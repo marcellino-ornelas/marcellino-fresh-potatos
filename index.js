@@ -4,6 +4,14 @@ const sqlite = require('sqlite'),
       express = require('express'),
       app = express();
 
+/*
+ * Modules
+*/
+const qs = require('querystring');
+
+/*
+ * Env
+*/
 const { PORT=3000, NODE_ENV='development', DB_PATH='./db/database.db' } = process.env;
 
 // START SERVER
@@ -11,19 +19,30 @@ Promise.resolve()
   .then(() => app.listen(PORT, () => console.log(`App listening on port ${PORT}`)))
   .catch((err) => { if (NODE_ENV === 'development') console.error(err.stack); });
 
-// var db = sqlite.open("db/database.db", { promise: Promise});
-
-var conn = new Sequelize("null", "null", "null",{
+/*
+ * Initialize Sequelize
+*/
+var conn = new Sequelize('null', 'null', 'null',{
   host: 'localhost',
   dialect: 'sqlite',
   storage: 'db/database.db'
 });
 
-const Film = conn.define("Films",{
+/*
+ * Film Model
+*/
+const Genre = conn.define('genre',{
+  name: Sequelize.STRING
+},{
+  timestamps: false
+});
+
+
+const Film = conn.define('film',{
   title: Sequelize.STRING,
   releaseDate:{
     type: Sequelize.STRING,
-    field:"release_date"
+    field:'release_date'
   },
   tagline: Sequelize.STRING,
   revenue :Sequelize.INTEGER,
@@ -31,41 +50,86 @@ const Film = conn.define("Films",{
   runtime:Sequelize.INTEGER,
   originalLanguage: {
     type: Sequelize.STRING,
-    field: "original_language"
+    field: 'original_language'
   },
   status: Sequelize.STRING,
   genreId:{
     type: Sequelize.INTEGER,
-    field: "genre_id"
+    field: "genre_id",
+    references: {
+      model: Genre,
+      key: "id"
+    }
   }
 },{
-  timestamps: false,
+  timestamps: false
 });
+
+Film.belongsTo(Genre);
+
+/*
+ * Variables
+*/
+
+const reviewUrl = 'http://credentials-api.generalassemb.ly/4576f55f-c427-4cfc-a11c-5bfe914ca6c1';
 
 // ROUTES
 app.get('/films/:id/recommendations', getFilmRecommendations);
 
 // ROUTE HANDLER
 function getFilmRecommendations(req, res) {
-  var filmId = req.params.id;
-  // request.get('http://credentials-api.generalassemb.ly/4576f55f-c427-4cfc-a11c-5bfe914ca6c1', function(err, response,body){
-  //   if(err){
-  //     res.status(500).send("error")
-  //   }
-  //   var data = JSON.parse(body)
+  const filmId = req.params.id;
+  const limit = parseInt(req.query.limit, 10) || 10;
+  const offset = parseInt(req.query.offset, 10) || 0;
 
-  //   console.log(data)
-  //   res.json({ recommendations: data })
+  // console.log("limit: " + limit);
+  // console.log("offset: " + offset);
 
-  // });
-  conn.sync().then(function(){
+  let finalResults = null;
 
-    Film.findById(filmId).then(function(article){
-      console.log(article)
-    });
+  conn.sync()
+    .then(() => Film.findById(filmId,{include: [{model: Genre }] }) )
+    .then(function(result){
 
-  }).error(console.log);
+      var qenreId = result.dataValues.genre.dataValues.id
 
+      return Film.findAll({
+        where:{
+          genreId: qenreId
+        },
+        include:[{
+          model: Genre,
+          attributes: ["name"]
+        }],
+        limit: limit,
+        offset: offset
+      });
+    })
+    .then(function(results){
+      let ids = [];
+
+      finalResults = results.map(function(item){
+        // Store ids of films
+        let holder = item.dataValues;
+        ids.push(holder.id);
+        holder.genre = holder.genre.dataValues.name;
+
+        return holder;
+      });
+
+      console.log("ids: ", ids);
+      console.log(finalResults);
+
+      const url = `${reviewUrl}?films=${ids.join(",")}`;
+
+      // send data to api
+     console.log(request.get(url))
+     console.log(request.get(url).then ? "true" : "false")
+
+    })
+    .error(function(err){
+      res.status(500).json({messages:'error'})
+    })
 }
 
 module.exports = app;
