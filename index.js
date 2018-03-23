@@ -129,9 +129,6 @@ function getFilmRecommendations(req, res) {
         return holder;
       });
 
-      console.log("ids: ", ids);
-      console.log(finalResults);
-
       // send data to api
      return new Promise(function(resolve, reject){
         request.get({ url: reviewUrl, qs:{ films: ids.join(",") }})
@@ -142,6 +139,11 @@ function getFilmRecommendations(req, res) {
     })
     .then(function(response){
       console.log(response)
+
+      var reviews = response.body.filter(function({reviews}){
+        return reviews.length >= 5 && (reviews.reduce((acc, num) => acc + num.rating, 0) / reviews.length) > 4;
+      });
+
     })
     .error(function(err){
       res.status(500).json({messages:'error'})
