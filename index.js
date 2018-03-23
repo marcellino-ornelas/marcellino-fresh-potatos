@@ -93,9 +93,21 @@ function getFilmRecommendations(req, res) {
 
       var qenreId = result.dataValues.genre.dataValues.id
 
+      var startDate = new Date(result.dataValues.releaseDate);
+      var endDate = new Date(result.dataValues.releaseDate);
+
+      var currentdate = startDate.getFullYear();
+
+      startDate.setFullYear( currentdate - 15 );
+      endDate.setFullYear( currentdate + 15 );
+
+
       return Film.findAll({
         where:{
-          genreId: qenreId
+          genreId: qenreId,
+          releaseDate:{
+            between: [startDate, endDate]
+          }
         },
         include:[{
           model: Genre,
