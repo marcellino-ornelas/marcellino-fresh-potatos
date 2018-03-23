@@ -132,12 +132,16 @@ function getFilmRecommendations(req, res) {
       console.log("ids: ", ids);
       console.log(finalResults);
 
-      const url = `${reviewUrl}?films=${ids.join(",")}`;
-
       // send data to api
-     console.log(request.get(url))
-     console.log(request.get(url).then ? "true" : "false")
+     return new Promise(function(resolve, reject){
+        request.get({ url: reviewUrl, qs:{ films: ids.join(",") }})
+          .on("error", reject)
+          .on("response", resolve);
+     })
 
+    })
+    .then(function(response){
+      console.log(response)
     })
     .error(function(err){
       res.status(500).json({messages:'error'})
