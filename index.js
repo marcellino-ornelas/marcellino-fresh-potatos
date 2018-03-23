@@ -129,20 +129,28 @@ function getFilmRecommendations(req, res) {
         return holder;
       });
 
+      console.log(ids)
+
       // send data to api
      return new Promise(function(resolve, reject){
-        request.get({ url: reviewUrl, qs:{ films: ids.join(",") }})
-          .on("error", reject)
-          .on("response", resolve);
+        // request.get({ url: reviewUrl, qs:{ films: ids.join(",")}, json: true})
+        //   .on("error", reject)
+        //   .on("response", resolve);
+        request.get({ url: reviewUrl, qs:{ films: ids.join(",")}, json: true}, function(err,response,body){
+          if(err) return reject(err);
+          resolve(response);
+        });
      })
 
     })
     .then(function(response){
-      console.log(response)
+      // console.log(response.body)
 
       var reviews = response.body.filter(function({reviews}){
         return reviews.length >= 5 && (reviews.reduce((acc, num) => acc + num.rating, 0) / reviews.length) > 4;
       });
+
+      console.log(reviews);
 
     })
     .error(function(err){
