@@ -71,54 +71,62 @@ Film.belongsTo(Genre);
  * Variables
 */
 
+const ERROR_MESSAGE = {message:'"message" key missing'};
 const reviewUrl = 'http://credentials-api.generalassemb.ly/4576f55f-c427-4cfc-a11c-5bfe914ca6c1';
 
 // ROUTES
 app.get('/films/:id/recommendations', getFilmRecommendations);
 
-app.use(function( err, req, res, next ){
-  res.status(404).json({error: err});
-})
+app.get("*", function( req, res ){
+  /*
+   * All other routes
+  */
+   res.status( 404 ).json( ERROR_MESSAGE );
+});
 
 
 // ROUTE HANDLER
 function getFilmRecommendations( req, res ) {
 
-  console.log(req.originalUrl)
   const filmId = req.params.id;
-
-
   const limit = parseInt( req.query.limit || 10, 10 );
   const offset = parseInt( req.query.offset || 0, 10 );
 
-  // console.log("limit: " + limit);
-  // console.log("offset: " + offset);
-
-  if( isNaN( filmId ) ){
-    res.status( 422 ).json( {messages:'this is my sending error'} )
+  if( isNaN( filmId ) || isNaN(limit) || isNaN(offset) ){
+    /*
+     * Send 422 status when limit, offset, or filmId is not a number
+    */
+    res.status( 422 ).json( ERROR_MESSAGE );
   }
 
-  let films = null;
+  // keep track of films indexes
   const tracker = {};
+  let films = null;
+
 
   conn.sync()
-    .then(() => Film.findById(filmId,{include: [{model: Genre }] }) )
+    .then(() => Film.findById( filmId, { include: [{model: Genre}] } ) )
     .then(function(result){
 
       if(!result) {
-        return Promise.reject( new Error('"message" key missing') )
+        return Promise.reject( true )
       };
 
-      var qenreId = result.dataValues.genre.dataValues.id;
+      let mainFilm = result.dataValues;
 
-      var startDate = new Date(result.dataValues.releaseDate);
-      var endDate = new Date(result.dataValues.releaseDate);
+      var qenreId = mainFilm.genre.dataValues.id;
+
+      // Make date objects for start and end date times
+      var startDate = new Date( mainFilm.releaseDate );
+      var endDate = new Date( mainFilm.releaseDate );
 
       var currentdate = startDate.getFullYear();
 
+      // set date to 15 years back
       startDate.setFullYear( currentdate - 15 );
-      endDate.setFullYear( currentdate + 15 );
 
+      // set date to 15 years forward
+      endDate.setFullYear( currentdate + 15 );
 
       return Film.findAll({
         where:{
@@ -130,14 +138,7 @@ function getFilmRecommendations( req, res ) {
         },
         attributes:["id","title","releaseDate"],
         order:[['id', 'ASC']],
-        include:[{
-          model: Genre,
-          attributes: ["name"]
-        }],
-        // limit did not work
-        // why:
-        // limit: limit,
-        offset: offset,
+        include: [{model: Genre, attributes: ["name"] }],
         raw: true
       });
     })
@@ -146,17 +147,15 @@ function getFilmRecommendations( req, res ) {
 
       films = results;
 
-      results.forEach(function( { id, title, releaseDate }, index ){
-        // Store ids of films
-        ids += `${id}${index === films.length - 1 ? "":","}`;
+      films.forEach(function( { id }, index ){
+        // Store ids of films to send to 3rd party api
+        ids += `${id}${index === films.length - 1 ? '' : ','}`;
+        // keep track of index of films
         tracker[id] = index;
       });
 
       // send data to api
      return new Promise(function( resolve, reject ){
-        // request.get({ url: reviewUrl, qs:{ films: ids.join(",")}, json: true})
-        //   .on("error", reject)
-        //   .on("response", resolve);
         request.get({ url: reviewUrl, qs:{ films: ids}, json: true}, function( err, response, body ){
           if(err) return reject(err);
           resolve(response);
@@ -165,26 +164,17 @@ function getFilmRecommendations( req, res ) {
 
     })
     .then(function( response ){
-      // console.log(response.body.length)
 
       let finalResults = [];
-      // console.log(films.length)
-      // console.log("query length: " + response.body.length)
 
       var reviews = response.body.filter(function({ film_id, reviews }){
-        // console.log("This film has " + reviews.length + "reviews");
-        // console.log("This film has average score is  " + reviews.reduce((acc, num) => acc + num.rating, 0) / reviews.length);
-        // return reviews.length >= 5 && (reviews.reduce((acc, num) => acc + num.rating, 0) / reviews.length) > 4;
-        const overallScore = reviews.reduce(( acc, num ) =>  acc + num.rating , 0);
-        const average =  overallScore / reviews.length;
 
-//         console.log(`\
-// film_id: ${film_id}
-// average: ${average}
-// did pass: ${reviews.length >= 5 && average >= 4}
-// `)
+        const overallScore = reviews.reduce(( acc, num ) =>  acc + num.rating , 0);
+        const average =  Number( (overallScore / reviews.length).toFixed(2) );
 
         if(reviews.length >= 5 && average >= 4){
+          // Get index of film with help from tracker.
+          // The reason for this is to prevent a nested loop to search for film.
           let filmIndex = tracker[ film_id ];
           let film = films[ filmIndex ];
 
@@ -193,21 +183,18 @@ function getFilmRecommendations( req, res ) {
             title: film.title,
             releaseDate: film.releaseDate,
             reviews: reviews.length,
-            genre: film["genre.name"],
-            averageRating: Number(average.toFixed(2))
+            genre: film['genre.name'],
+            averageRating: average
           });
 
         }
 
       });
-      // console.log("final results length: " + finalResults.length)
-      res.json({ recommendations: finalResults.slice(offset, offset + limit), meta: { limit, offset } })
 
-      // console.log(reviews.length);
-
+      res.json({ recommendations: finalResults.slice(offset, offset + limit), meta: { limit, offset } });
     })
     .error(function(err){
-      res.status(500).json({error: err})
+      res.status(500).json(ERROR_MESSAGE);
     })
 }
 
