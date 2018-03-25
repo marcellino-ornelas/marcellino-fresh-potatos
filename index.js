@@ -76,22 +76,40 @@ const reviewUrl = 'http://credentials-api.generalassemb.ly/4576f55f-c427-4cfc-a1
 // ROUTES
 app.get('/films/:id/recommendations', getFilmRecommendations);
 
+app.use(function( err, req, res, next ){
+  res.status(404).json({error: err});
+})
+
+
 // ROUTE HANDLER
-function getFilmRecommendations(req, res) {
+function getFilmRecommendations( req, res ) {
+
+  console.log(req.originalUrl)
   const filmId = req.params.id;
-  const limit = parseInt(req.query.limit, 10) || 10;
-  const offset = parseInt(req.query.offset, 10) || 0;
+
+
+  const limit = parseInt( req.query.limit || 10, 10 );
+  const offset = parseInt( req.query.offset || 0, 10 );
 
   // console.log("limit: " + limit);
   // console.log("offset: " + offset);
 
-  let finalResults = null;
+  if( isNaN( filmId ) ){
+    res.status( 422 ).json( {messages:'this is my sending error'} )
+  }
+
+  let films = null;
+  const tracker = {};
 
   conn.sync()
     .then(() => Film.findById(filmId,{include: [{model: Genre }] }) )
     .then(function(result){
 
-      var qenreId = result.dataValues.genre.dataValues.id
+      if(!result) {
+        return Promise.reject( new Error('"message" key missing') )
+      };
+
+      var qenreId = result.dataValues.genre.dataValues.id;
 
       var startDate = new Date(result.dataValues.releaseDate);
       var endDate = new Date(result.dataValues.releaseDate);
@@ -106,55 +124,90 @@ function getFilmRecommendations(req, res) {
         where:{
           genreId: qenreId,
           releaseDate:{
-            between: [startDate, endDate]
+            "$lte": endDate,
+            "$gte": startDate
           }
         },
+        attributes:["id","title","releaseDate"],
+        order:[['id', 'ASC']],
         include:[{
           model: Genre,
           attributes: ["name"]
         }],
-        limit: limit,
-        offset: offset
+        // limit did not work
+        // why:
+        // limit: limit,
+        offset: offset,
+        raw: true
       });
     })
-    .then(function(results){
-      let ids = [];
+    .then(function( results ){
+      let ids = "";
 
-      finalResults = results.map(function(item){
+      films = results;
+
+      results.forEach(function( { id, title, releaseDate }, index ){
         // Store ids of films
-        let holder = item.dataValues;
-        ids.push(holder.id);
-        holder.genre = holder.genre.dataValues.name;
-
-        return holder;
+        ids += `${id}${index === films.length - 1 ? "":","}`;
+        tracker[id] = index;
       });
 
-      console.log(ids)
-
       // send data to api
-     return new Promise(function(resolve, reject){
+     return new Promise(function( resolve, reject ){
         // request.get({ url: reviewUrl, qs:{ films: ids.join(",")}, json: true})
         //   .on("error", reject)
         //   .on("response", resolve);
-        request.get({ url: reviewUrl, qs:{ films: ids.join(",")}, json: true}, function(err,response,body){
+        request.get({ url: reviewUrl, qs:{ films: ids}, json: true}, function( err, response, body ){
           if(err) return reject(err);
           resolve(response);
         });
      })
 
     })
-    .then(function(response){
-      // console.log(response.body)
+    .then(function( response ){
+      // console.log(response.body.length)
 
-      var reviews = response.body.filter(function({reviews}){
-        return reviews.length >= 5 && (reviews.reduce((acc, num) => acc + num.rating, 0) / reviews.length) > 4;
+      let finalResults = [];
+      // console.log(films.length)
+      // console.log("query length: " + response.body.length)
+
+      var reviews = response.body.filter(function({ film_id, reviews }){
+        // console.log("This film has " + reviews.length + "reviews");
+        // console.log("This film has average score is  " + reviews.reduce((acc, num) => acc + num.rating, 0) / reviews.length);
+        // return reviews.length >= 5 && (reviews.reduce((acc, num) => acc + num.rating, 0) / reviews.length) > 4;
+        const overallScore = reviews.reduce(( acc, num ) =>  acc + num.rating , 0);
+        const average =  overallScore / reviews.length;
+
+//         console.log(`\
+// film_id: ${film_id}
+// average: ${average}
+// did pass: ${reviews.length >= 5 && average >= 4}
+// `)
+
+        if(reviews.length >= 5 && average >= 4){
+          let filmIndex = tracker[ film_id ];
+          let film = films[ filmIndex ];
+
+          finalResults.push({
+            id: film.id,
+            title: film.title,
+            releaseDate: film.releaseDate,
+            reviews: reviews.length,
+            genre: film["genre.name"],
+            averageRating: Number(average.toFixed(2))
+          });
+
+        }
+
       });
+      // console.log("final results length: " + finalResults.length)
+      res.json({ recommendations: finalResults.slice(offset, offset + limit), meta: { limit, offset } })
 
-      console.log(reviews);
+      // console.log(reviews.length);
 
     })
     .error(function(err){
-      res.status(500).json({messages:'error'})
+      res.status(500).json({error: err})
     })
 }
 
